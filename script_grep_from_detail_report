@@ -1,0 +1,555 @@
+#!/usr/bin/perl
+
+#$StartCount = "$ARGV[0]" ;
+#$EndCount   = "$ARGV[1]" ;
+#$infile     = "$ARGV[2]" ;
+
+@hlb_clk_pin = (
+) ;
+
+$hlb_clk_pin_list = join("|" , @hlb_clk_pin) ;
+
+$SS = 3 ;
+$EE = 3 ;
+
+while($#ARGV > -1) {
+  if(! $ARGV[0] ) { last; }
+  $option = "$ARGV[0]";
+
+  if( $option=~/-S(\d+)/ ) {
+   #print "SSSSS\n" ;
+    $SS = $1 ;
+  }elsif ( $option=~/-E(\d+)/ ) {
+   #print "EEEEE\n" ;
+    $EE = $1 ;
+  }else {
+    $infile = "$option";
+  }
+  shift;
+}
+
+
+if ( ! $infile ) {
+  print "Error\n" ;
+  exit(1);
+}
+
+
+%comp_cmd = ("bz2" => "bzip2", "gz" => "gzip", "Z" => "gzip");
+%comp_ext = ("gzip" => ".gz", "bzip2" => ".bz2", "" => "");
+
+if ($infile =~ /\.(bz2|gz|Z)$/) {
+  open(IN, "$comp_cmd{$1} -dc $infile |");
+}
+else {
+  open(IN, $infile);
+}
+
+$Flag = 0 ;
+$Startpoint = "" ;
+$Endpoint   = "" ;
+$cnt  = 0 ;
+$aaaa = 0 ;
+
+$end_start_path = 0 ;
+
+#################################
+#  clock sys_83m_clk (rise edge)   36.000     36.000
+#################################
+#################################
+#  clock uncertainty                                      -2.08       8.32
+#  inter-clock uncertainty                                -0.40      15.44
+#################################
+
+
+$mode = 0;
+$Mcs = 0;
+$Mct = 0;
+
+
+while(<IN>) {
+  chomp($_) ;
+
+
+	if (/full_clock_expanded/){
+		$mode = 1;
+	}
+
+
+
+	if(/Startpoint\s*\:/) {
+		$Startpoint = $_ ;
+		$Flag = 1 ;
+
+
+		if(/Startpoint\s*\:\s+(\S+)/) {
+			$tmpSTR = $1 ;
+			$Dcs = '' ;
+			$Dct = '' ;
+#print "tmpSTR : $tmpSTR\n" ;
+		}
+
+	}
+
+	if( $Flag >= 1 ) {
+		if(/Endpoint\s*\:/) {
+			$Endpoint = $_ ;
+			$Flag = 2 ;
+			if(/Endpoint\s*\:\s+(\S+)/) {
+				$tmpEND = $1 ;
+			}
+		}
+	
+		if(/Path\s+Group\:/) {
+			$PathGroup = $_ ;
+			$Flag = 3 ;
+		}
+
+		if(/Path\s+Type\:/) {
+			$PathType = $_ ;
+			$Flag = 3 ;
+		}
+
+		if ( /\s*data\s+arrival\s+time/ ) {
+			$end_start_path = 1 ;
+		}
+
+#		if(/clock\s+\S+\s+\(\S+\s+edge\)\s+(\-?[0-9\.]+)\s+\-?[0-9\.]+/) {}
+		if(/clock\s+\S+\s+\(\S+\s+edge\).+?(\-?[0-9\.]+)\s+\-?[0-9\.]+$/) {
+			if ( $end_start_path == 0 ) {
+				$Start_Clk_Edge = $1 ;
+				#print "### debug ### Start $Start_Clk_Edge \n" ;
+			} else {
+				$End_Clk_Edge   = $1 ;
+				#print "### debug ### End   $End_Clk_Edge \n" ;
+			}
+		}
+
+    #################################
+    #  clock uncertainty                                      -2.08       8.32
+    #  inter-clock uncertainty                                -0.40      15.44
+    #################################
+		if ( /clock\s+uncertainty\s+(\S+)/ ) {
+			$Uncertainty = $1 ;
+		}
+		if ( /inter-clock\s+uncertainty\s+(\S+)/ ) {
+			$Uncertainty = $1 ;
+		}
+
+	#	if(/slack\s*\S+\s*(\S+)/) {
+		if(/slack\s*\(.*\)\s*(\S+)/) {
+			$Slack= $1 ;
+		#	if( $Slack=="increase" ) {
+		#		$Slack= "-0" ;
+		#	}
+
+		  if(/VIOLATED/) {
+			  $Flag = 4 ;
+			} else {
+#???			  $Flag = 5 ;
+			  $Flag = 4 ;
+		  }
+		}
+
+
+		### --------------------
+		### Clock Skew
+		### --------------------
+
+		if ( $mode == 0 ){
+			#if (/clock\s+network delay\s+\(propagated\)\s+([0-9\.]+)\s+[0-9\.]+/) {
+			if (/clock\s+network delay\s+\(propagated\)\s+([0-9\.]+)[\s\*]+[0-9\.]+/) {
+				if ( $end_start_path == 0 ) {
+					$Tcs = $1 ;
+				} else {
+					$Tct = $1 ;
+				}
+			}
+			if(/clock reconvergence pessimism\s+([0-9\.]+)\s+[0-9\.]+/){
+				$Tcrp = $1 ;
+			}
+
+		} elsif ( $mode == 1 ) {
+			if (/clock\s+\S+\s+\(source latency\)\s+([0-9\.]+)\s+[0-9\.]+/) {
+				if ( $end_start_path == 0 ) {
+					$Lcs = $1 ;
+				} else {
+					$Lct = $1 ;
+				}
+			}
+
+			if (/^\s+$tmpSTR\/(CLK.?|$hlb_clk_pin_list)\s+\(\S+\).+\s+([0-9\.]+)\s+[rf]/){
+				if($Dcs eq ''){ $Dcs = $2 } else { next } ;
+#print "Dcs : $Dcs\n" ;
+			} elsif (/^\s+$tmpSTR\s+\(\S+\).+\s+([0-9\.]+)\s+[rf]/){
+				if($Dcs eq ''){ $Dcs = $1 } else { next } ;
+#print "Dcs2 : $Dcs\n" ;
+			} elsif (/^\s+$tmpEND\/(CLK.?|$hlb_clk_pin_list)\s+\(\S+\).+\s+([0-9\.]+)\s+[rf]/){
+				if($Dct eq ''){ $Dct = $2 } else { next } ;
+#print "Dct : $Dct\n" ;
+			} elsif (/^\s+$tmpEND\s+\(\S+\).+\s+([0-9\.]+)\s+[rf]/){
+				if($Dct eq ''){ $Dct = $1 } else { next } ;
+#print "Dct2 : $Dct\n" ;
+			#} elsif (/^\s+$tmpEND\/CK.\s+\(\S+\)\s+([0-9\.]+)\s+\*\s+([0-9\.]+)/){
+			#	$Dct = $2 ;
+			}
+
+
+
+
+
+
+			if(/clock\s+\S+\s+\(\S+\s+edge\)\s+(\-?[0-9\.]+)\s+\-?[0-9\.]+/) {
+				if ( $end_start_path == 0 ) {
+					$Mcs = $1 ;
+#print "Mcs: $Mcs\n" ;
+				} else {
+					$Mct = $1 ;
+#print "Mct: $Mct\n" ;
+				}
+			} elsif (/^\s+max_delay\s+([0-9\.]+)\s+[0-9\.]+/){
+				$Mcs = 0 ;
+				$Mct = $1 ;
+			}
+
+			if(/clock reconvergence pessimism\s+(\-?[0-9\.]+)\s+[0-9\.]+/){
+				$Tcrp = $1 ;
+#print "Tcrp: $Tcrp\n" ;
+			}
+		}
+
+		###
+		### end
+		###
+
+
+		if( $Flag == 1 ) {
+			$Startpoint = "$Startpoint $_" ;
+		} 
+		if( $Flag == 2 ) {
+			$Endpoint   = "$Endpoint $_"   ;
+		}
+	}
+
+
+	if( $Flag == 4 ) {
+		if ( $Startpoint =~/Startpoint\:\s+(\S+)\s+.*\s+(\S+)\)/ ) {
+			$Start_Ins = $1 ;
+			$Start_Clk = $2 ;
+		}
+
+		if ( $Endpoint =~/Endpoint\:\s+(\S+)\s+.*\s+(\S+)\)/ ) {
+			$End_Ins   = $1 ;
+			$End_Clk   = $2 ;
+		}
+
+		if ( $PathGroup =~/Path Group\:\s*(\S+)/ ) {
+			$PG        = $1 ;
+#			if      ( $PG =~/async_default/ ) {
+#				$PG = "async"  ; 
+#			} elsif ( $PG =~/clock_gating_default/ ) {
+#				$PG = "gating" ;
+#			} else {
+#				$PG = "data" ;
+#			}
+		}
+
+		if ( $PathType =~/Path Type\:\s*(\S+)/ ) {
+		#	$ptv        = $1 ;
+			if ( $1 eq max ) { ;
+				$ptv = setup ;
+			}elsif ( $1 eq min ) {
+				$ptv = hold ;
+			}else {
+				$ptv = unknown ;
+			}
+		}
+
+		$Phase_Diff = $End_Clk_Edge - $Start_Clk_Edge ;
+		$Phase_Diff = sprintf("%.3f",$Phase_Diff) ;
+
+		###
+		### s.ina
+		###
+		if ( $mode == 0 ) {
+			$ClkSkew = $Tcs - $Tct - $Tcrp ;
+		} elsif ( $mode == 1 ) {
+			if($Dcs eq '' || $Dct eq ''){
+				$ClkSkew = '---' ;
+			} else {
+				$Tcs = $Dcs - $Lcs - $Mcs ;
+				$Tct = $Dct - $Lct - $Mct ;
+				$ClkSkew = $Tcs - $Tct - $Tcrp ;
+				$ClkSkew = sprintf("%.3f",$ClkSkew) ;
+				$Mcs = 0;
+				$Mct = 0;
+			}
+		}
+
+
+
+
+
+		@START_INS = split(/\//,$Start_Ins);
+		@END_INS   = split(/\//,$End_Ins);
+
+		if ( $ptv eq hold ) {
+			if ( $Phase_Diff != 0 ) {
+				print "Edge_Diff = $Phase_Diff , $Start_Ins($Start_Clk) => $End_Ins($End_Clk)\n" ;
+			}
+		}
+
+		$Start_instanse = "" ;
+		for ( $n=0 ; $n<=($SS-1) ; ++$n ) {
+
+			if ( $START_INS[$n] eq "" ) {
+				break ;
+			} else {
+			  $Start_instanse = "$Start_instanse$START_INS[$n]\/" ;
+			}
+		}
+
+
+		$Start_instanse =~s/[\/]+$// ;
+		$Start_instanse =~s/ .*// ;
+
+		$End_instanse = "" ;
+		for ( $n=0 ; $n<=($EE-1) ; ++$n ) {
+
+			if ( $END_INS[$n] eq "" ) {
+				break ;
+			} else {
+				$End_instanse = "$End_instanse$END_INS[$n]\/" ;
+			}
+		}
+		$End_instanse =~s/[\/]+$// ;
+		$End_instanse =~s/ //g ;
+
+
+	#	$ALL_INS = "$Start_instanse $Start_Clk $End_instanse $End_Clk $PG" ;
+	#	$ALL_INS = "$PG $Start_Clk $End_Clk $Start_instanse $End_instanse" ;
+		$ALL_INS = "$ptv $PG $Start_Clk $End_Clk $Start_instanse $End_instanse" ;
+
+		#if ( $End_Clk eq vb_gclk13p5 ) {
+		#	$aaaa++ ;
+		#	print "$aaaa $$ALL_INS\n" ;
+		#}
+
+		if ( ! $$ALL_INS ) {
+			$$ALL_INS = $Slack ;
+			$$ALL_INS[0] = 1 ;
+			$$ALL_INS[1] = "$Start_instanse" ;
+			$$ALL_INS[2] = "$Start_Clk" ;
+			$$ALL_INS[3] = "$End_instanse" ;
+			$$ALL_INS[4] = "$End_Clk" ;
+			$$ALL_INS[5] = "$PG" ;
+			$$ALL_INS[6] = "$ptv" ;
+			$$ALL_INS[7] = "$Phase_Diff" ;
+			$$ALL_INS[8] = "$Uncertainty" ;
+			$$ALL_INS[9] = "$ClkSkew" ;
+			push ( @AAAAA , $ALL_INS ) ;
+
+		}else {
+			$$ALL_INS[0]++ ;
+			if ( $Slack < $$ALL_INS ) {
+				$$ALL_INS = $Slack ;
+$$ALL_INS[9] = "$ClkSkew" ;
+			}
+
+			if ( $ptv eq setup ) {
+			  if ( $Uncertainty < $$ALL_INS[8] ) {
+			    $$ALL_INS[8] = "$Uncertainty" ;
+			  }
+			} elsif ( $ptv eq hold ) {
+			  if ( $Uncertainty > $$ALL_INS[8] ) {
+			    $$ALL_INS[8] = "$Uncertainty" ;
+			  }
+			}
+
+			if ( $ptv eq setup ) {
+				if ( $Phase_Diff < $$ALL_INS[7] ) {
+					$$ALL_INS[7] = "$Phase_Diff" ;
+				}
+			} elsif ( $ptv eq hold ) {
+				if ( $Phase_Diff > $$ALL_INS[7] ) {
+					$$ALL_INS[7] = "$Phase_Diff" ;
+				}
+			}
+
+			###
+			###
+			###
+			#if ( $ptv eq setup ) {
+			#	if ( $ClkSkew < $$ALL_INS[9] ) {
+			#		$$ALL_INS[9] = "$ClkSkew" ;
+			#	}
+			#} elsif ( $ptv eq hold ) {
+			#	if ( $ClkSkew > $$ALL_INS[9] ) {
+			#		$$ALL_INS[9] = "$ClkSkew" ;
+			#	}
+			#}
+
+#			if ( $ClkSkew > $$ALL_INS[9] ) {
+#				$$ALL_INS[9] = "$ClkSkew" ;
+#			}
+
+
+
+
+
+		}
+
+	#	print "$Start_instanse\n" ;
+	#	print "$End_instanse\n" ;
+	#	print "@START_INS[0]\n" ;
+	#	print "@END_INS[0]\n" ;
+	#	print "$Startpoint_Ins $Startpoint_Edge\n" ;
+	#	print "$Endpoint_Ins $Endpoint_Edge\n" ;
+
+		$Start_instanse = "" ;
+		$Start_Clk = "" ;
+		$End_instanse = "" ;
+		$End_Clk = "" ;
+		$S_edge = "" ;
+		$E_edge = "" ;
+		$Start = 0 ;
+		$Startpoint = "" ;
+		$Endpoint   = "" ;
+		$PG   = "" ;
+		$Slack   = "" ;
+		$Flag   = 0 ;
+		$ALL_INS = "" ;
+		$PathGroup = "" ;
+		$PathType = "" ;
+		$ptv = "" ;
+		$end_start_path = 0 ;
+		$Phase_Diff = ""  ;
+		$Uncertainty = "" ;
+		$ClkSkew = "" ;
+	}
+
+	if( $Flag == 5 ) {
+		$Start_instanse = "" ;
+		$Start_Clk = "" ;
+		$End_instanse = "" ;
+		$End_Clk = "" ;
+		$S_edge = "" ;
+		$E_edge = "" ;
+		$Start = 0 ;
+		$Startpoint = "" ;
+		$Endpoint   = "" ;
+		$PG   = "" ;
+		$Slack   = "" ;
+		$Flag   = 0 ;
+		$ALL_INS = "" ;
+		$PathGroup = "" ;
+		$PathType = "" ;
+		$ptv = "" ;
+		$end_start_path = 0 ;
+		$Phase_Diff = ""  ;
+		$Uncertainty = "" ;
+		$ClkSkew = "" ;
+  }
+
+}
+close(IN);
+
+$CNT_Count     = 5 ;
+$CNT_Slack     = 5 ;
+$CNT_PathType  = 8 ;
+$CNT_PathGroup = 8 ;
+$CNT_Sclk      = 9 ;
+$CNT_Eclk      = 8 ;
+$CNT_S_M       = 11;
+$CNT_E_M       = 9 ;
+$CNT_PhaseDiff = 9 ;
+$CNT_Uncertain = 9 ;
+$CNT_ClkSkew   = 9 ;
+
+foreach $aaa ( @AAAAA ) {
+        $cnt_Count      = length($$aaa[0]) ;
+        $cnt_Slack      = length($$aaa   ) ;
+        $cnt_PathType   = length($$aaa[6]) ;
+        $cnt_PathGroup  = length($$aaa[5]) ;
+        $cnt_Sclk       = length($$aaa[2]) ;
+        $cnt_Eclk       = length($$aaa[4]) ;
+        $cnt_S_M        = length($$aaa[1]) ;
+        $cnt_E_M        = length($$aaa[3]) ;
+        $cnt_PhaseDiff  = length($$aaa[7]) ;
+        $cnt_Uncertain  = length($$aaa[8]) ;
+	$cnt_ClkSkew    = length($$aaa[9]) ;
+
+        if ( $CNT_Count      < $cnt_Count     ) {  $CNT_Count      = $cnt_Count     ; }
+        if ( $CNT_Slack      < $cnt_Slack     ) {  $CNT_Slack      = $cnt_Slack     ; }
+        if ( $CNT_PathType   < $cnt_PathType  ) {  $CNT_PathType   = $cnt_PathType  ; }
+        if ( $CNT_PathGroup  < $cnt_PathGroup ) {  $CNT_PathGroup  = $cnt_PathGroup ; }
+        if ( $CNT_Sclk       < $cnt_Sclk      ) {  $CNT_Sclk       = $cnt_Sclk      ; }
+        if ( $CNT_Eclk       < $cnt_Eclk      ) {  $CNT_Eclk       = $cnt_Eclk      ; }
+        if ( $CNT_S_M        < $cnt_S_M       ) {  $CNT_S_M        = $cnt_S_M       ; }
+        if ( $CNT_E_M        < $cnt_E_M       ) {  $CNT_E_M        = $cnt_E_M       ; }
+        if ( $CNT_PhaseDiff  < $cnt_PhaseDiff ) {  $CNT_PhaseDiff  = $cnt_PhaseDiff ; }
+        if ( $CNT_Uncertain  < $cnt_Uncertain ) {  $CNT_Uncertain  = $cnt_Uncertain ; }
+        if ( $CNT_ClkSkew    < $cnt_ClkSkew   ) {  $CNT_ClkSkew    = $cnt_ClkSkew   ; }
+
+}
+
+	printf("%$CNT_Count\s",     Count      ) ;
+	print "\t" ;
+	printf("%$CNT_Slack\s",     Slack      ) ;
+	print "\t" ;
+	printf("%$CNT_PathType\s",  PathType   ) ;
+	print "\t" ;
+	printf("%$CNT_PathGroup\s", PathGrp    ) ;
+	print "\t" ;
+	printf("%-$CNT_Sclk\s",     StartClock ) ;
+	print "\t" ;
+	printf("%-$CNT_Eclk\s",     EndClock   ) ;
+	print "\t" ;
+	printf("%$CNT_ClkSkew\s",   ClkSkew  ) ;
+	print "\t" ;
+	printf("%$CNT_PhaseDiff\s", Edge_Diff  ) ;
+	print "\t" ;
+	printf("%$CNT_Uncertain\s", Uncertain  ) ;
+	print "\t" ;
+	printf("%-$CNT_S_M\s",      StartModule) ;
+	print "\t" ;
+	printf("%-$CNT_E_M\s",      EndModule  ) ;
+	print "\n" ;
+
+foreach $aaa ( @AAAAA ) {
+
+	if($$aaa[8] eq ''){ $$aaa[8] = 0 } ;
+
+	printf("%$CNT_Count\s",     $$aaa[0]) ;
+	print "\t" ;
+	printf("%$CNT_Slack\s",     $$aaa   ) ;
+	print "\t" ;
+	printf("%$CNT_PathType\s",  $$aaa[6]) ;
+	print "\t" ;
+	printf("%$CNT_PathGroup\s", $$aaa[5]) ;
+	print "\t" ;
+	printf("%-$CNT_Sclk\s",     $$aaa[2]) ;
+	print "\t" ;
+	printf("%-$CNT_Eclk\s",     $$aaa[4]) ;
+	print "\t" ;
+	printf("%$CNT_ClkSkew\s",   $$aaa[9]) ;
+	print "\t" ;
+	printf("%$CNT_PhaseDiff\s", $$aaa[7]) ;
+	print "\t" ;
+	printf("%$CNT_Uncertain\s", $$aaa[8]) ;
+	print "\t" ;
+	printf("%-$CNT_S_M\s",      $$aaa[1]) ;
+	print "\t" ;
+	printf("%-$CNT_E_M\s",      $$aaa[3]) ;
+	print "\n" ;
+
+}
+
+
+
+
+### skew
+# Clock Skew = (clock network delay (propagated))start - (clock network delay (propagated))end -   clock reconvergence pessimism                                               0.00       3.18
+
+
+# skew = Tcs - Tct - Tcrp
