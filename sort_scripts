@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+use Getopt::Long;
+use strict;
+use warnings; 
+
+my $dir;
+GetOptions("directory=s"=>\$dir) or die("Error in command line arguments\n");
+opendir (DIR, "$dir");
+my @filelist = readdir(DIR);
+my @keyword = ("WNS","TNS", "NUM")x2;
+
+print "="x150;print"\n";
+printf ("%-50s %47s %47s\n", "","Setup","Hold");
+printf ("-50s %15s %15s %15s %15s %15s %15s\n", "", "WNS","TNS","NUM","WNS","TNS","NUM");
+print "="x150;print"\n;
+
+sub open_dir{
+	foreach my $file (@filelist){
+		my $i = 0;
+		if ($file =~ /report_global_timing/){
+			my $fulldir = $dir.$file;
+			printf ("%-50s ","$file");
+			unless(open FILE, $fulldir){
+				die"Fail to open $fulldir\n";
+			}
+			while (my_$line = <FILE>){
+				if ($line =~ /^$keyword[$i]/){
+					#print "keyword[$i]";
+					my @reading = split(' ",$line);
+					printf ("%15s ", $reading[2]);
+					$i += 1;
+					last if $i ==6;
+				}
+			}
+			print "\n";
+		}
+	}
+}
+
+open_dir();
