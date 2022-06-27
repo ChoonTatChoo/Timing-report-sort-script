@@ -23,7 +23,7 @@ sub open_dir{
 			unless(open FILE, $fulldir){
 				die"Fail to open $fulldir\n";
 			}
-			while (my_$line = <FILE>){
+			while (my $line = <FILE>){
 				if ($line =~ /^$keyword[$i]/){
 					#print "keyword[$i]";
 					my @reading = split(' ',$line);
