@@ -11,7 +11,7 @@ my @keyword = ("WNS","TNS", "NUM")x2;
 
 print "="x150;print"\n";
 printf ("%-50s %47s %47s\n", "","Setup","Hold");
-printf ("-50s %15s %15s %15s %15s %15s %15s\n", "", "WNS","TNS","NUM","WNS","TNS","NUM");
+printf ("%-50s %15s %15s %15s %15s %15s %15s\n", "", "WNS","TNS","NUM","WNS","TNS","NUM");
 print "="x150;print"\n";
 
 sub open_dir{
